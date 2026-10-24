@@ -1,0 +1,10 @@
+requests
+pandas
+pyarrow
+scipy
+statsmodels
+scikit-learn
+matplotlib
+python-dotenv
+tqdm
+tabulate
