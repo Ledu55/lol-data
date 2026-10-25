@@ -42,30 +42,39 @@ def collect_ranks(refresh: bool = False) -> None:
     puuids = [r[0] for r in con.execute(query)]
     for puuid in tqdm(puuids, desc="elos"):
         entries = client.entries_by_puuid(puuid)
+        now = _now()
         con.execute("DELETE FROM ranks WHERE puuid = ?", (puuid,))
         for e in entries:
             if e["queueType"] in (config.SOLO, config.FLEX):
-                con.execute(
-                    "INSERT INTO ranks VALUES (?,?,?,?,?,?,?)",
-                    (puuid, e["queueType"], e["tier"], e.get("rank"), e["leaguePoints"],
-                     e["wins"], e["losses"]),
-                )
-        con.execute("INSERT OR REPLACE INTO rank_fetch VALUES (?,?)", (puuid, _now()))
+                row = (puuid, e["queueType"], e["tier"], e.get("rank"), e["leaguePoints"],
+                       e["wins"], e["losses"])
+                con.execute("INSERT INTO ranks VALUES (?,?,?,?,?,?,?)", row)
+                con.execute("INSERT OR REPLACE INTO rank_history VALUES (?,?,?,?,?,?,?,?)", (*row, now))
+        con.execute("INSERT OR REPLACE INTO rank_fetch VALUES (?,?)", (puuid, now))
         con.commit()
 
 
+GROUPS = {
+    "all": "SELECT DISTINCT puuid FROM apex",
+    # Master+ só na flex: reforça o teste C, que compara esse grupo em partidas de solo.
+    "flex-only": f"SELECT puuid FROM apex WHERE queue = '{config.FLEX}' "
+                 f"AND puuid NOT IN (SELECT puuid FROM apex WHERE queue = '{config.SOLO}')",
+}
+
+
 def collect_matches(sample: int | None, per_queue: int, since_days: int,
-                    timelines: bool, seed: int = 42) -> None:
-    """Partidas recentes (solo e flex) de uma amostra dos jogadores high elo."""
+                    timelines: bool, group: str = "all", seed: int = 42) -> None:
+    """Partidas recentes de uma amostra dos jogadores high elo (solo e flex; só solo no grupo flex-only)."""
     client, con = _client(), connect()
-    puuids = sorted(r[0] for r in con.execute("SELECT DISTINCT puuid FROM apex"))
+    puuids = sorted(r[0] for r in con.execute(GROUPS[group]))
     if sample and sample < len(puuids):
         puuids = random.Random(seed).sample(puuids, sample)
+    queue_ids = list(config.QUEUE_IDS.values()) if group == "all" else [config.QUEUE_IDS[config.SOLO]]
     start = int((dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=since_days)).timestamp())
 
     done = set(con.execute("SELECT puuid, queue_id FROM match_fetch"))
     for puuid in tqdm(puuids, desc="listas de partidas"):
-        for queue_id in config.QUEUE_IDS.values():
+        for queue_id in queue_ids:
             if (puuid, queue_id) in done:
                 continue
             ids = client.match_ids(puuid, queue_id, per_queue, start)

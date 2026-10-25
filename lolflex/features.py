@@ -28,7 +28,7 @@ def _participant_row(match_id, queue_id, minutes, p) -> dict:
         "match_id": match_id, "queue_id": queue_id, "puuid": p["puuid"],
         "participant_id": p["participantId"], "team_id": p["teamId"],
         "role": p["teamPosition"], "champion": p["championName"], "win": int(p["win"]),
-        "duration_min": minutes,
+        "duration_min": minutes, "surrender": int(p.get("gameEndedInSurrender", False)),
         "kills": p["kills"], "deaths": p["deaths"], "assists": p["assists"],
         "kda": (p["kills"] + p["assists"]) / max(1, p["deaths"]),
         "deaths_pm": p["deaths"] / minutes,

@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS match_fetch (puuid TEXT, queue_id INT, fetched_at TEX
     PRIMARY KEY (puuid, queue_id));
 CREATE TABLE IF NOT EXISTS matches (match_id TEXT PRIMARY KEY, queue_id INT, data BLOB);
 CREATE TABLE IF NOT EXISTS timelines (match_id TEXT PRIMARY KEY, data BLOB);
+CREATE TABLE IF NOT EXISTS rank_history (
+    puuid TEXT, queue TEXT, tier TEXT, division TEXT, lp INT, wins INT, losses INT, fetched_at TEXT,
+    PRIMARY KEY (puuid, queue, fetched_at)
+);
 """
 
 
@@ -29,6 +33,11 @@ def connect() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    # Primeira foto do histórico: o elo já coletado, com a data em que foi buscado.
+    if con.execute("SELECT 1 FROM rank_history LIMIT 1").fetchone() is None:
+        con.execute("INSERT OR IGNORE INTO rank_history SELECT r.*, f.fetched_at "
+                    "FROM ranks r JOIN rank_fetch f USING (puuid)")
+        con.commit()
     return con
 
 
