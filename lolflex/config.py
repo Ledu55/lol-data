@@ -10,6 +10,9 @@ DB_PATH = DATA_DIR / "lol.sqlite"
 
 load_dotenv(ROOT / ".env")
 
+# JSON consumidos pelo repo de conteúdo (ex.: lol-content/src/data); sem a variável, ficam em data/.
+EXPORT_DIR = Path(os.getenv("LOLFLEX_EXPORT", DATA_DIR))
+
 PLATFORM = os.getenv("RIOT_PLATFORM", "br1")
 REGION = os.getenv("RIOT_REGION", "americas")
 # Limites da chave de desenvolvimento; atualizados automaticamente pelos headers da API.

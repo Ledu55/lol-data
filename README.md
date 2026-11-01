@@ -1,13 +1,17 @@
-# lol-flex-vs-solo
+# lol-data
 
-Hipótese: jogadores high elo (Master+) da fila flex são menos habilidosos que os da solo/duo (servidor BR).
+Coleta e análise de dados de League of Legends (Riot API). Os vídeos e o resto da produção de conteúdo ficam no repo `lol-content`.
+
+Primeiro estudo, flex vs solo. Hipótese: jogadores high elo (Master+) da fila flex são menos habilidosos que os da solo/duo (servidor BR).
 
 ## Setup
 
 ```powershell
-cd E:\lol-flex-vs-solo
-copy .env.example .env   # cole sua RIOT_API_KEY
+cd E:\lol-data
+python -m venv .venv
 .venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env   # cole sua RIOT_API_KEY
 ```
 
 ## Pipeline
@@ -23,9 +27,15 @@ copy .env.example .env   # cole sua RIOT_API_KEY
 | 7. **Testes B e C** | `python -m lolflex test-bc` | 0 |
 | 8. Mais partidas de solo dos Master+ só da flex (reforça o C) | `python -m lolflex matches --group flex-only --sample 400 --per-queue 15 --timelines` | ~2 por partida |
 | 9. **Estudos complementares** | `python -m lolflex studies` | 0 |
+| 10. Desempenho de jogadores (dados do vídeo "Quem carregou?") | `python -m lolflex perf` | 0 |
 
 Todas as etapas de coleta são retomáveis (Ctrl+C e roda de novo). Os dados ficam em `data/lol.sqlite` e os relatórios em `reports/`.
 Com a chave de desenvolvimento (100 req/2 min), o passo 2 leva de 2 a 3 horas e o passo 4 com 500 jogadores leva de 1 a 2 dias. Para escalar, peça uma Personal API Key.
+
+## Export para o repo de conteúdo
+
+Os JSON que os vídeos leem (`perf_data.json`) são gravados em `LOLFLEX_EXPORT`. Aponte essa variável do `.env` para a pasta `src/data` do `lol-content`
+(ex.: `LOLFLEX_EXPORT=E:\lol-content\src\data`) e commite os JSON atualizados lá. Sem a variável, eles ficam em `data/`.
 
 ## Testes
 

@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from . import collect, features, score, studies, test_a, test_bc
+from . import collect, features, perf, score, studies, test_a, test_bc
 
 
 def main() -> None:
@@ -25,6 +25,7 @@ def main() -> None:
     sub.add_parser("score", help="treina o score e agrega por jogador")
     sub.add_parser("test-bc", help="testes B e C com o score")
     sub.add_parser("studies", help="estudos complementares (lobbies, grupos, conversão de elo...)")
+    sub.add_parser("perf", help="avaliação de desempenho de jogadores (alimenta o vídeo)")
 
     a = ap.parse_args()
     if a.cmd == "leagues":
@@ -43,6 +44,8 @@ def main() -> None:
         print(test_bc.run())
     elif a.cmd == "studies":
         print(studies.run())
+    elif a.cmd == "perf":
+        print(perf.run())
 
 
 if __name__ == "__main__":
