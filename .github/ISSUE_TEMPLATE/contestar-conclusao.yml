@@ -1,0 +1,48 @@
+name: Contestar uma conclusão
+description: Algo no método, nos dados ou na interpretação não se sustenta
+title: "[Contestação] "
+labels: ["contestação"]
+body:
+  - type: dropdown
+    id: conclusao
+    attributes:
+      label: Qual conclusão?
+      options:
+        - "1. Master+ da flex são, em mediana, Diamante na solo"
+        - "2. Na flex o mesmo jogador enfrenta lobbies mais fracos e rende mais"
+        - "3. Na solo, os Master+ só da flex rendem o esperado para o elo solo"
+        - "Score de desempenho (modelo)"
+        - "Coleta / amostra"
+        - "Outra"
+    validations:
+      required: true
+  - type: dropdown
+    id: tipo
+    attributes:
+      label: Tipo de problema
+      options:
+        - "Não consegui reproduzir os números"
+        - "Erro no código"
+        - "Viés na amostra ou na coleta"
+        - "Teste estatístico inadequado"
+        - "Interpretação não segue dos resultados"
+        - "Outro"
+    validations:
+      required: true
+  - type: textarea
+    id: argumento
+    attributes:
+      label: O argumento
+      description: O que está errado e por quê. Cite o relatório, a tabela ou a linha de código.
+    validations:
+      required: true
+  - type: textarea
+    id: evidencia
+    attributes:
+      label: Evidência
+      description: Números, código ou análise alternativa (rodada sobre o dataset público, de preferência). Diga a versão do dataset usada.
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que mudaria
+      description: Que teste ou correção resolveria, e o que você espera que ele mostre.

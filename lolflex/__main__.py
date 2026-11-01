@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from . import collect, features, perf, score, studies, test_a, test_bc
+from . import collect, export, features, perf, score, studies, test_a, test_bc
 
 
 def main() -> None:
@@ -26,6 +26,7 @@ def main() -> None:
     sub.add_parser("test-bc", help="testes B e C com o score")
     sub.add_parser("studies", help="estudos complementares (lobbies, grupos, conversão de elo...)")
     sub.add_parser("perf", help="avaliação de desempenho de jogadores (alimenta o vídeo)")
+    sub.add_parser("export-public", help="gera o dataset público anonimizado (zip)")
 
     a = ap.parse_args()
     if a.cmd == "leagues":
@@ -46,6 +47,8 @@ def main() -> None:
         print(studies.run())
     elif a.cmd == "perf":
         print(perf.run())
+    elif a.cmd == "export-public":
+        print(export.build())
 
 
 if __name__ == "__main__":

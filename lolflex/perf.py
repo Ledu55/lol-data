@@ -90,18 +90,22 @@ def example_match(m: pd.DataFrame) -> dict:
     x["role_order"] = x.role.map({r: i for i, r in enumerate(ROLES)})
     x = x.sort_values(["win", "role_order"], ascending=[False, True])
     # Campos crus da API para o destaque da partida (sem nome nem puuid).
-    match = unpack(connect().execute("SELECT data FROM matches WHERE match_id = ?", (match_id,)).fetchone()[0])
-    pid = int(best_lane.loc[match_id, "participant_id"])
-    p = next(q for q in match["info"]["participants"] if q["participantId"] == pid)
-    raw_keys = ["championName", "teamPosition", "kills", "deaths", "assists", "goldEarned",
-                "totalMinionsKilled", "totalDamageDealtToChampions", "visionScore", "win"]
-    challenge_keys = ["soloKills", "maxCsAdvantageOnLaneOpponent",
-                      "killParticipation", "teamDamagePercentage"]
-    raw = {k: p[k] for k in raw_keys}
-    raw["challenges"] = {k: _r(p["challenges"][k], 3) for k in challenge_keys}
+    # O dataset público não tem o JSON da Riot; aí o destaque fica vazio.
+    (blob,) = connect().execute("SELECT data FROM matches WHERE match_id = ?", (match_id,)).fetchone()
+    raw, fields = None, None
+    if blob is not None:
+        pid = int(best_lane.loc[match_id, "participant_id"])
+        p = next(q for q in unpack(blob)["info"]["participants"] if q["participantId"] == pid)
+        raw_keys = ["championName", "teamPosition", "kills", "deaths", "assists", "goldEarned",
+                    "totalMinionsKilled", "totalDamageDealtToChampions", "visionScore", "win"]
+        challenge_keys = ["soloKills", "maxCsAdvantageOnLaneOpponent",
+                          "killParticipation", "teamDamagePercentage"]
+        raw = {k: p[k] for k in raw_keys}
+        raw["challenges"] = {k: _r(p["challenges"][k], 3) for k in challenge_keys}
+        fields = len(p) + len(p.get("challenges", {}))
     return {
         "raw": raw,
-        "fields": len(p) + len(p.get("challenges", {})),
+        "fields": fields,
         "duration": _r(x.duration_min.iloc[0], 1),
         "players": [{
             "win": int(r.win), "role": r.role, "champion": r.champion,

@@ -1,20 +1,72 @@
 # lol-data
 
-Coleta e análise de dados de League of Legends (Riot API). Os vídeos e o resto da produção de conteúdo ficam no repo `lol-content`.
+Coleta e análise aberta de dados de League of Legends (Riot API, servidor BR). O código, os relatórios e um
+dataset anonimizado estão aqui para que qualquer pessoa possa refazer as contas e **contestar as conclusões**.
 
-Primeiro estudo, flex vs solo. Hipótese: jogadores high elo (Master+) da fila flex são menos habilidosos que os da solo/duo (servidor BR).
+## Estudo 1: os Master+ da flex são piores que os da solo?
 
-## Setup
+Hipótese: jogadores Master+ da fila flex são menos habilidosos que os Master+ da solo/duo.
+Coleta de 23 a 25/10/2026: 13.330 jogadores high elo das duas filas e 18.828 partidas (188 mil linhas jogador-partida).
+
+**Veredito: confirmada em parte.** Cada conclusão abaixo aponta o relatório que a sustenta e o que poderia derrubá-la.
+
+### 1. Um Master+ da flex é, em mediana, Diamante II na solo
+
+[Teste A](reports/test_a.md): dos 3.782 Master+ da flex, só 32% são Master+ na solo e 25% estão abaixo de Diamante.
+
+- **Ressalva:** o caminho inverso também cai, e cai mais. Master+ da solo são, em mediana, Esmeralda I na flex
+  (queda de 582 pts contra 353). Elo cruzado mede habilidade, mas também dedicação a cada fila: Master+ da solo
+  jogam pouca flex. Por isso o elo sozinho não basta, e os testes B e C medem desempenho dentro das partidas.
+
+### 2. Na flex, o mesmo jogador enfrenta lobbies bem mais fracos e rende mais
+
+[Estudos, §1](reports/studies.md): entre os outros 9 jogadores da partida, o mesmo jogador tem 5,7 Master+ da solo
+na solo e 1,3 na flex (n=329). [Teste B](reports/test_bc.md): o `score_lane` dele é 0,24 maior na flex
+(n=680, p=2,3e-6), e ele já está à frente do oponente de rota aos 10 e 15 minutos ([Estudos, §5](reports/studies.md)).
+
+- **Ressalva:** na flex, 31% dos jogadores estão em grupos de 3+. Quando contamos só as partidas de flex em que o
+  jogador estava sozinho ([Estudos, §4](reports/studies.md)), a diferença no score some (n=178, p=0,93), mas a
+  vantagem de ouro e CS aos 15 min continua. Os grupos são inferidos, porque a API não os informa.
+
+### 3. Na solo, os Master+ só da flex rendem o esperado para o próprio elo, ou um pouco mais
+
+[Teste C](reports/test_bc.md): nas partidas de solo, o score mediano dos Master+ só da flex (4,99, n=480) e dos
+Master+ da solo (5,06, n=5.316) não difere (p=0,21). Controlando pelo elo solo, o efeito é até positivo (+0,07, p=0,035).
+
+- **Ressalva:** os dois grupos quase não se sobrepõem em elo solo, então esse controle é uma extrapolação.
+
+### Limitações conhecidas
+
+- O `score` completo carrega parte do resultado do time (AUC 0,93–0,96 para prever vitória, [modelo](reports/score_model.md)).
+  O `score_lane`, que usa só métricas contra o oponente direto, reduz esse vazamento, sem eliminá-lo.
+- A métrica `plates` (`challenges.turretPlatesTaken` da API) parece não significar "placas que o jogador destruiu":
+  a soma por time dá ~40 em média, e o máximo possível é 15. Ela entra no score com peso moderado. A correção
+  (contar `TURRET_PLATE_DESTROYED` nas timelines) está em aberto.
+- Amostra de uma única foto de elo, de um servidor (BR), coletada com chave de desenvolvimento: 500 jogadores
+  sorteados, mais 400 Master+ só da flex para reforçar o teste C.
+
+## Como contestar
+
+1. **Reproduza.** Baixe o [dataset público](DATASET.md) e rode as análises. Não é preciso chave da Riot, e os
+   relatórios devem sair idênticos aos de `reports/`.
+2. **Abra uma issue** com o formulário [Contestar uma conclusão](https://github.com/Ledu55/lol-data/issues/new?template=contestar-conclusao.yml):
+   diga qual conclusão, o argumento e, se puder, a evidência (números ou código rodado sobre o dataset).
+3. **Mande um PR** com o teste ou a correção. Veja [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Contestações que se sustentarem viram correções nos relatórios e entram no registro abaixo, com link para a issue.
+
+### Registro de correções
+
+Nenhuma até agora.
+
+## Pipeline
 
 ```powershell
-cd E:\lol-data
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env   # cole sua RIOT_API_KEY
+copy .env.example .env   # cole sua RIOT_API_KEY (só para coletar)
 ```
-
-## Pipeline
 
 | Passo | Comando | Requisições (aprox.) |
 |---|---|---|
@@ -28,21 +80,17 @@ copy .env.example .env   # cole sua RIOT_API_KEY
 | 8. Mais partidas de solo dos Master+ só da flex (reforça o C) | `python -m lolflex matches --group flex-only --sample 400 --per-queue 15 --timelines` | ~2 por partida |
 | 9. **Estudos complementares** | `python -m lolflex studies` | 0 |
 | 10. Desempenho de jogadores (dados do vídeo "Quem carregou?") | `python -m lolflex perf` | 0 |
+| 11. Dataset público anonimizado | `python -m lolflex export-public` | 0 |
 
+Com o dataset público, rode a partir do passo 3, pulando 4, 5 e 8.
 Todas as etapas de coleta são retomáveis (Ctrl+C e roda de novo). Os dados ficam em `data/lol.sqlite` e os relatórios em `reports/`.
-Com a chave de desenvolvimento (100 req/2 min), o passo 2 leva de 2 a 3 horas e o passo 4 com 500 jogadores leva de 1 a 2 dias. Para escalar, peça uma Personal API Key.
-
-## Export para o repo de conteúdo
-
-Os JSON que os vídeos leem (`perf_data.json`) são gravados em `LOLFLEX_EXPORT`. Aponte essa variável do `.env` para a pasta `src/data` do `lol-content`
-(ex.: `LOLFLEX_EXPORT=E:\lol-content\src\data`) e commite os JSON atualizados lá. Sem a variável, eles ficam em `data/`.
+Com a chave de desenvolvimento (100 req/2 min), o passo 2 leva de 2 a 3 horas e o passo 4 com 500 jogadores leva de 1 a 2 dias.
 
 ## Testes
 
 - **A**: em que elo estão, na solo, os Master+ da flex? E o inverso? Compara a queda de elo ao trocar de fila (Mann-Whitney + IC por bootstrap).
 - **B**: o mesmo jogador tem score diferente na solo e na flex? (Wilcoxon pareado)
 - **C**: nas partidas de solo, quem é Master+ só na flex tem score menor que os Master+ da solo? Inclui OLS controlando pelo elo solo.
-  Limitação: os dois grupos quase não se sobrepõem em elo solo, então esse controle é uma extrapolação.
 
 ## Estudos complementares (`reports/studies.md`)
 
@@ -60,3 +108,15 @@ Os JSON que os vídeos leem (`perf_data.json`) são gravados em `LOLFLEX_EXPORT`
 
 Os z-scores por rota alimentam uma regressão logística de vitória por rota. O score da partida é 10 × P(vitória), calculado fora da amostra.
 O score do jogador é a média com shrinkage (k=10). `score_lane` usa só métricas contra o oponente de rota (exige `--timelines`), que dependem menos do resultado do time.
+
+## Export para o repo de conteúdo
+
+Os JSON que os vídeos leem (`perf_data.json`) são gravados em `LOLFLEX_EXPORT` (`.env`). Sem a variável, ficam em `data/`.
+
+## Licença
+
+Código sob [MIT](LICENSE). Relatórios e dataset sob [CC BY 4.0](LICENSE-DATA).
+
+lol-data não é endossado pela Riot Games e não reflete as opiniões da Riot Games nem de ninguém oficialmente
+envolvido na produção ou gestão das propriedades da Riot Games. Riot Games e todas as propriedades associadas são
+marcas comerciais ou marcas registradas da Riot Games, Inc.
