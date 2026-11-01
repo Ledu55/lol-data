@@ -39,9 +39,6 @@ Master+ da solo (5,06, n=5.316) não difere (p=0,21). Controlando pelo elo solo,
 
 - O `score` completo carrega parte do resultado do time (AUC 0,93–0,96 para prever vitória, [modelo](reports/score_model.md)).
   O `score_lane`, que usa só métricas contra o oponente direto, reduz esse vazamento, sem eliminá-lo.
-- A métrica `plates` (`challenges.turretPlatesTaken` da API) parece não significar "placas que o jogador destruiu":
-  a soma por time dá ~40 em média, e o máximo possível é 15. Ela entra no score com peso moderado. A correção
-  (contar `TURRET_PLATE_DESTROYED` nas timelines) está em aberto.
 - Amostra de uma única foto de elo, de um servidor (BR), coletada com chave de desenvolvimento: 500 jogadores
   sorteados, mais 400 Master+ só da flex para reforçar o teste C.
 
@@ -108,6 +105,11 @@ Com a chave de desenvolvimento (100 req/2 min), o passo 2 leva de 2 a 3 horas e 
 
 Os z-scores por rota alimentam uma regressão logística de vitória por rota. O score da partida é 10 × P(vitória), calculado fora da amostra.
 O score do jogador é a média com shrinkage (k=10). `score_lane` usa só métricas contra o oponente de rota (exige `--timelines`), que dependem menos do resultado do time.
+
+`plates` (`challenges.turretPlatesTaken`) conta as placas de torre pelas quais o jogador recebeu ouro, não só as
+que ele destruiu: o ouro da placa é dividido com os aliados próximos. Nos patches 16.x as torres externa, interna e
+do inibidor têm 5 placas cada, então um time pode tomar até 45; nas timelines, a soma do time fica em ~1,3× as
+placas destruídas (`TURRET_PLATE_DESTROYED`).
 
 ## Export para o repo de conteúdo
 
