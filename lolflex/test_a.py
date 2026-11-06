@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from . import video_export
 from .config import REPORTS_DIR
 from .ranks import DIAMOND_FLOOR, MASTER_FLOOR, load_players
 
@@ -20,6 +21,15 @@ def _describe(other: pd.Series) -> dict:
         "% Master+ na outra fila": 100 * (ranked >= MASTER_FLOOR).mean(),
         "% abaixo de Diamante": 100 * (ranked < DIAMOND_FLOOR).mean(),
     }
+
+
+def _histograma(valores: pd.Series) -> list[dict]:
+    """Contagem por divisão, de Esmeralda IV a Diamante I, mais as faixas abaixo de Esmeralda e Master+."""
+    faixas = [("abaixo", -np.inf, DIAMOND_FLOOR - 400)]
+    faixas += [(f"{int(v)}", v, v + 100) for v in range(DIAMOND_FLOOR - 400, MASTER_FLOOR, 100)]
+    faixas += [("master", MASTER_FLOOR, np.inf)]
+    return [{"faixa": nome, "de": None if np.isinf(lo) else lo, "jogadores": int(((valores >= lo) & (valores < hi)).sum())}
+            for nome, lo, hi in faixas]
 
 
 def _bootstrap_median_diff(a, b, n=5000, seed=0):
@@ -64,6 +74,23 @@ def run(min_games: int = 20) -> str:
                   "Atenção: a amostra é truncada (só high elo), então use como descrição.", ""]
     else:
         lines += ["Amostra insuficiente para o teste de gaps.", ""]
+
+    dados = {"jogadores": len(p), "direcoes": {}}
+    for chave, grupo, outra in (("flex_para_solo", flex_group, "value_solo"), ("solo_para_flex", solo_group, "value_flex")):
+        d = _describe(grupo[outra])
+        dados["direcoes"][chave] = {
+            "jogadores": d["jogadores"],
+            "sem_elo": d["sem elo na outra fila"],
+            "mediana": d["mediana outra fila"],
+            "pct_master": d["% Master+ na outra fila"],
+            "pct_abaixo_diamante": d["% abaixo de Diamante"],
+            # Histograma do elo na outra fila, de 100 em 100 pontos (uma divisão); abaixo de Esmeralda e Master+ agrupados.
+            "histograma": _histograma(grupo[outra].dropna()),
+        }
+    if len(gap_flex) >= 10 and len(gap_solo) >= 10:
+        dados["queda"] = {"min_partidas": min_games, "flex": np.median(gap_flex), "n_flex": len(gap_flex),
+                          "solo": np.median(gap_solo), "n_solo": len(gap_solo), "p_flex_cai_mais": u.pvalue}
+    video_export.gravar("teste_a", dados)
 
     REPORTS_DIR.mkdir(exist_ok=True)
     _plot(p)

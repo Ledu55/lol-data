@@ -79,6 +79,9 @@ copy .env.example .env   # cole sua RIOT_API_KEY (só para coletar)
 | 10. Desempenho de jogadores (dados do vídeo "Quem carregou?") | `python -m lolflex perf` | 0 |
 | 11. Dataset público anonimizado | `python -m lolflex export-public` | 0 |
 
+Os passos 3, 7 e 9 também gravam `elo_flex_data.json` em `LOLFLEX_EXPORT`, com os mesmos números dos relatórios, sem
+arredondar. É o que o vídeo "O elo da flex" lê.
+
 Com o dataset público, rode a partir do passo 3, pulando 4, 5 e 8.
 Todas as etapas de coleta são retomáveis (Ctrl+C e roda de novo). Os dados ficam em `data/lol.sqlite` e os relatórios em `reports/`.
 Com a chave de desenvolvimento (100 req/2 min), o passo 2 leva de 2 a 3 horas e o passo 4 com 500 jogadores leva de 1 a 2 dias.

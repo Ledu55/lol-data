@@ -16,7 +16,7 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from . import config
+from . import config, video_export
 from .config import DATA_DIR, REPORTS_DIR
 from .db import connect
 from .ranks import MASTER_FLOOR, load_players, rank_value
@@ -58,6 +58,15 @@ def _paired_row(name: str, paired: pd.DataFrame, digits: int = 3) -> str:
             f"{paired[FLEX_ID].mean():.{digits}f} | {diff.mean():+.{digits}f} | {_p(p)} |")
 
 
+def _paired_stats(paired: pd.DataFrame) -> dict | None:
+    """Os mesmos números de _paired_row, sem arredondar, para o JSON do vídeo."""
+    if len(paired) < 10:
+        return None
+    diff = paired[FLEX_ID] - paired[SOLO_ID]
+    return {"jogadores": len(paired), "solo": paired[SOLO_ID].mean(), "flex": paired[FLEX_ID].mean(),
+            "flex_menos_solo": diff.mean(), "p": stats.wilcoxon(diff).pvalue}
+
+
 PAIRED_HEADER = ["| medida | jogadores | solo | flex | flex - solo | p (Wilcoxon) |",
                  "|:--|--:|--:|--:|--:|--:|"]
 
@@ -73,7 +82,7 @@ def _role_z(rows: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 # 1 ----------------------------------------------------------------------------------------------
 
-def lobby_level(m: pd.DataFrame, players: pd.DataFrame, anchors: pd.DataFrame) -> list[str]:
+def lobby_level(m: pd.DataFrame, players: pd.DataFrame, anchors: pd.DataFrame, out: dict) -> list[str]:
     d = m[["match_id", "queue_id", "puuid"]].copy()
     # Exclui o jogador da amostra (âncora) para olhar só os outros 9 da partida.
     d = d.merge(anchors.assign(anchor=True), on=["puuid", "match_id"], how="left")
@@ -91,10 +100,12 @@ def lobby_level(m: pd.DataFrame, players: pd.DataFrame, anchors: pd.DataFrame) -
              "de Master+ da solo é exata.", "",
              "| fila | partidas | Master+ da solo por lobby (média) | high elo por lobby (média) | "
              "elo solo médio dos conhecidos |", "|:--|--:|--:|--:|--:|"]
+    out["lobbies"] = {}
     for q, name in ((SOLO_ID, "solo"), (FLEX_ID, "flex")):
         x = per_match[per_match.queue_id == q]
         lines.append(f"| {name} | {len(x)} | {x.master_solo.mean():.2f} | {x.high_elo.mean():.2f} | "
                      f"{rank_label(x.elo_solo.mean())} |")
+        out["lobbies"][name] = {"partidas": len(x), "master_solo": x.master_solo.mean(), "high_elo": x.high_elo.mean()}
     a = per_match.loc[per_match.queue_id == FLEX_ID, "master_solo"]
     b = per_match.loc[per_match.queue_id == SOLO_ID, "master_solo"]
     lines += ["", f"Mann-Whitney (flex < solo em Master+ por lobby): p={_p(stats.mannwhitneyu(a, b, alternative='less').pvalue)}.", ""]
@@ -104,21 +115,24 @@ def lobby_level(m: pd.DataFrame, players: pd.DataFrame, anchors: pd.DataFrame) -
     by_anchor["master_solo"] = by_anchor.puuid.map(players.value_solo) >= MASTER_FLOOR
     lob = (by_anchor.groupby(["puuid_anchor", "match_id", "queue_id"]).master_solo.sum()
            .reset_index().rename(columns={"puuid_anchor": "puuid"}))
-    lines += PAIRED_HEADER + [_paired_row("Master+ da solo nos outros 9 (mesmo jogador da amostra)",
-                                          _paired(lob, "master_solo"), 2), ""]
+    pr = _paired(lob, "master_solo")
+    lines += PAIRED_HEADER + [_paired_row("Master+ da solo nos outros 9 (mesmo jogador da amostra)", pr, 2), ""]
+    out["lobbies"]["mesmo_jogador"] = _paired_stats(pr)
     return lines
 
 
 # 2 ----------------------------------------------------------------------------------------------
 
-def conversion_table(players: pd.DataFrame, min_games: int = 20) -> list[str]:
+def conversion_table(players: pd.DataFrame, out: dict, min_games: int = 20) -> list[str]:
     both = players[(players.games_solo >= min_games) & (players.games_flex >= min_games)]
     bins = [(0, 100), (100, 200), (200, 400), (400, 700), (700, 10_000)]
     lines = ["## 2. Tabela de conversão de elo", "",
              f"Jogadores com ≥{min_games} partidas nas duas filas. Só vale a partir de Master na fila "
              "de origem: abaixo disso a amostra só tem quem é Master+ na outra fila (truncada).", ""]
+    out["conversao"] = {}
     for src, dst, title in (("flex", "solo", "Master+ na flex → elo na solo"),
                             ("solo", "flex", "Master+ na solo → elo na flex")):
+        faixas = out["conversao"][f"{src}_para_{dst}"] = []
         lines += [f"**{title}**", "",
                   f"| PDL na {src} | jogadores | mediana na {dst} | faixa central (25%–75%) | % Master+ na {dst} |",
                   "|:--|--:|:--|:--|--:|"]
@@ -131,13 +145,16 @@ def conversion_table(players: pd.DataFrame, min_games: int = 20) -> list[str]:
             q1, med, q3 = x.quantile([0.25, 0.5, 0.75])
             lines.append(f"| {label} | {len(x)} | {rank_label(med)} | {rank_label(q1)} a {rank_label(q3)} | "
                          f"{100 * (x >= MASTER_FLOOR).mean():.0f}% |")
+            faixas.append({"pdl_de": lo, "pdl_ate": None if hi == 10_000 else hi - 1, "jogadores": len(x),
+                           "mediana": med, "mediana_rotulo": rank_label(med), "q1_rotulo": rank_label(q1),
+                           "q3_rotulo": rank_label(q3), "pct_master": 100 * (x >= MASTER_FLOOR).mean()})
         lines.append("")
     return lines
 
 
 # 3 ----------------------------------------------------------------------------------------------
 
-def win_rates(m: pd.DataFrame, players: pd.DataFrame, min_games: int = 20) -> list[str]:
+def win_rates(m: pd.DataFrame, players: pd.DataFrame, out: dict, min_games: int = 20) -> list[str]:
     con = connect()
     r = pd.read_sql("SELECT puuid, queue, wins, losses FROM ranks", con)
     r["wr"] = r.wins / (r.wins + r.losses)
@@ -153,13 +170,18 @@ def win_rates(m: pd.DataFrame, players: pd.DataFrame, min_games: int = 20) -> li
              "fila; o grupo \"nas duas\" é o mais justo.", "",
              "| grupo | jogadores | % vitórias solo | % vitórias flex | flex - solo (p.p.) | p (Wilcoxon) |",
              "|:--|--:|--:|--:|--:|--:|"]
-    for name, mask in groups:
+    out["vitorias"] = {}
+    for (name, mask), key in zip(groups, ("so_solo", "so_flex", "nas_duas")):
         x = wide[mask]
         diff = x[config.FLEX] - x[config.SOLO]
         lines.append(f"| {name} | {len(x)} | {100 * x[config.SOLO].mean():.1f} | {100 * x[config.FLEX].mean():.1f} | "
                      f"{100 * diff.mean():+.1f} | {_p(stats.wilcoxon(diff).pvalue)} |")
+        out["vitorias"][key] = {"jogadores": len(x), "solo": 100 * x[config.SOLO].mean(), "flex": 100 * x[config.FLEX].mean(),
+                                "flex_menos_solo": 100 * diff.mean(), "p": stats.wilcoxon(diff).pvalue}
+    pr = _paired(m.assign(win=100 * m.win), "win")
     lines += ["", "**Partidas da amostra** (≥5 em cada fila):", ""] + PAIRED_HEADER
-    lines += [_paired_row("% vitórias", _paired(m.assign(win=100 * m.win), "win"), 1), ""]
+    lines += [_paired_row("% vitórias", pr, 1), ""]
+    out["vitorias"]["amostra"] = _paired_stats(pr)
     return lines
 
 
@@ -193,8 +215,9 @@ def premade_sizes(m: pd.DataFrame) -> pd.Series:
     return pd.Series([size.get(k, 1) for k in idx], index=m.index)
 
 
-def premades(m: pd.DataFrame) -> list[str]:
+def premades(m: pd.DataFrame, out: dict) -> list[str]:
     m = m.assign(group=premade_sizes(m))
+    g4 = out["grupos"] = {"filas": {}, "sozinho": {}, "grupo_vs_sozinho": {}}
     lines = ["## 4. Grupos pré-formados", "",
              f"A API não informa grupos; aqui, dois jogadores do mesmo time que jogaram juntos em "
              f"≥{MIN_SHARED} partidas da amostra contam como grupo. Na solo o máximo legítimo é 2 "
@@ -204,6 +227,7 @@ def premades(m: pd.DataFrame) -> list[str]:
         g = m.loc[m.queue_id == q, "group"]
         lines.append(f"| {name} | {100 * (g == 1).mean():.1f}% | {100 * (g == 2).mean():.1f}% | "
                      f"{100 * (g >= 3).mean():.1f}% |")
+        g4["filas"][name] = {"sozinho": 100 * (g == 1).mean(), "grupo_2": 100 * (g == 2).mean(), "grupo_3_mais": 100 * (g >= 3).mean()}
     flex = m[m.queue_id == FLEX_ID]
     lines += ["", "**Teste B sem grupos**: flex só com partidas em que o jogador estava sozinho.", ""]
     lines += PAIRED_HEADER
@@ -216,9 +240,14 @@ def premades(m: pd.DataFrame) -> list[str]:
         # Controle: os mesmos jogadores com todas as partidas de flex. Se o efeito também some
         # aqui, a diferença vem de quem são esses jogadores, não de jogar em grupo.
         same = m[m.puuid.isin(pr.index)]
-        lines.append(_paired_row(f"`{col}`, flex todas (mesmos jogadores)", _paired(same, col)))
+        pr_same = _paired(same, col)
+        lines.append(_paired_row(f"`{col}`, flex todas (mesmos jogadores)", pr_same))
+        g4["sozinho"][col] = _paired_stats(pr)
+        g4["sozinho"][f"{col}_todas"] = _paired_stats(pr_same)
     for col in ("gold_diff15", "cs_diff15"):
-        lines.append(_paired_row(f"`{col}` (DP), flex sozinho", _paired(lane_alone, col)))
+        pr = _paired(lane_alone, col)
+        lines.append(_paired_row(f"`{col}` (DP), flex sozinho", pr))
+        g4["sozinho"][col] = _paired_stats(pr)
     lines += ["", "**Na flex, o mesmo jogador rende mais em grupo?** (≥3 partidas de cada tipo)", "",
               "| medida | jogadores | sozinho | em grupo | grupo - sozinho | p (Wilcoxon) |",
               "|:--|--:|--:|--:|--:|--:|"]
@@ -230,6 +259,8 @@ def premades(m: pd.DataFrame) -> list[str]:
             diff = g.grupo - g.sozinho
             lines.append(f"| `{col}` | {len(g)} | {g.sozinho.mean():.3f} | {g.grupo.mean():.3f} | "
                          f"{diff.mean():+.3f} | {_p(stats.wilcoxon(diff).pvalue)} |")
+            g4["grupo_vs_sozinho"][col] = {"jogadores": len(g), "sozinho": g.sozinho.mean(), "grupo": g.grupo.mean(),
+                                           "grupo_menos_sozinho": diff.mean(), "p": stats.wilcoxon(diff).pvalue}
     return lines + [""]
 
 
@@ -255,22 +286,27 @@ def _solo_trained_score(m: pd.DataFrame) -> pd.Series:
     return out
 
 
-def result_free(m: pd.DataFrame) -> list[str]:
+def result_free(m: pd.DataFrame, out: dict) -> list[str]:
     lane = ["gold_diff10", "xp_diff10", "cs_diff10", "gold_diff15", "xp_diff15", "cs_diff15"]
     z = _role_z(m, lane)
     lines = ["## 5. Score sem o resultado do time", "",
              "Diferenças contra o oponente direto aos 10 e 15 minutos, sem modelo nenhum "
              "(z-score por rota; antes de o jogo se decidir), e um score treinado só com partidas de solo.", ""]
     lines += PAIRED_HEADER
+    g5 = out["rota"] = {}
     for c in lane:
-        lines.append(_paired_row(f"`{c}` (desvios-padrão)", _paired(z, c)))
-    lines.append(_paired_row("score treinado só na solo", _paired(m.assign(s=_solo_trained_score(m)), "s")))
+        pr = _paired(z, c)
+        lines.append(_paired_row(f"`{c}` (desvios-padrão)", pr))
+        g5[c] = _paired_stats(pr)
+    pr = _paired(m.assign(s=_solo_trained_score(m)), "s")
+    lines.append(_paired_row("score treinado só na solo", pr))
+    g5["score_treinado_solo"] = _paired_stats(pr)
     return lines + [""]
 
 
 # 6 ----------------------------------------------------------------------------------------------
 
-def decompose(m: pd.DataFrame) -> list[str]:
+def decompose(m: pd.DataFrame, out: dict) -> list[str]:
     cols = list(dict.fromkeys(FULL + LANE))
     z = _role_z(m, cols)
     rows = []
@@ -288,14 +324,18 @@ def decompose(m: pd.DataFrame) -> list[str]:
     lines += ["", "**Teste B por rota** (mesmo jogador, mesma rota, ≥3 partidas em cada fila):", "",
               "| rota | jogadores | score solo | score flex | flex - solo | p (Wilcoxon) |",
               "|:--|--:|--:|--:|--:|--:|"]
+    out["metricas"] = [{"metrica": c, "jogadores": n, "flex_menos_solo_dp": d, "p": p} for c, n, d, p in rows]
+    out["por_rota"] = {}
     for role, d in m.groupby("role"):
-        lines.append(_paired_row(role, _paired(d, "score", 3)))
+        pr = _paired(d, "score", 3)
+        lines.append(_paired_row(role, pr))
+        out["por_rota"][role] = _paired_stats(pr)
     return lines + [""]
 
 
 # 7 ----------------------------------------------------------------------------------------------
 
-def matchmaking(m: pd.DataFrame, players: pd.DataFrame) -> list[str]:
+def matchmaking(m: pd.DataFrame, players: pd.DataFrame, out: dict) -> list[str]:
     d = m.assign(elo=m.puuid.map(players.value_solo))
     team = d.groupby(["match_id", "queue_id", "team_id"]).agg(
         elo=("elo", "mean"), known=("elo", "count"), win=("win", "first"),
@@ -310,10 +350,14 @@ def matchmaking(m: pd.DataFrame, players: pd.DataFrame) -> list[str]:
     lines = ["## 7. Qualidade do pareamento", "",
              "| fila | partidas | dispersão do elo solo (DP, ≥6 conhecidos) | diferença absoluta de ouro entre times aos 15 (mediana) | "
              "duração (mediana, min) | % terminadas em rendição |", "|:--|--:|--:|--:|--:|--:|"]
+    g7 = out["pareamento"] = {}
     for q, name in ((SOLO_ID, "solo"), (FLEX_ID, "flex")):
         x = match[match.queue_id == q]
         lines.append(f"| {name} | {len(x)} | {x.loc[x.known >= 6, 'spread'].median():.0f} pts | "
                      f"{x.stomp.median():.0f} | {x.duration.median():.1f} | {100 * x.surrender.mean():.1f}% |")
+        g7[name] = {"partidas": len(x), "dispersao_elo": x.loc[x.known >= 6, "spread"].median(),
+                    "diferenca_ouro15": x.stomp.median(), "duracao_min": x.duration.median(),
+                    "pct_rendicao": 100 * x.surrender.mean()}
     a, b = (match[match.queue_id == q] for q in (FLEX_ID, SOLO_ID))
     lines += ["", "Mann-Whitney flex vs solo: "
               f"dispersão p={_p(stats.mannwhitneyu(a.loc[a.known >= 6, 'spread'], b.loc[b.known >= 6, 'spread']).pvalue)}, "
@@ -335,12 +379,13 @@ def matchmaking(m: pd.DataFrame, players: pd.DataFrame) -> list[str]:
         x = match[(match.queue_id == q) & (match.known >= 6)].dropna(subset=["stomp"])
         rho = stats.spearmanr(x.spread, x.stomp)
         lines.append(f"| {name} | {len(g)} | {100 * g.fav_won.mean():.1f}% | {rho.statistic:+.2f} (p={_p(rho.pvalue)}) |")
+        g7[name].update({"partidas_com_favorito": len(g), "pct_favorito_vence": 100 * g.fav_won.mean()})
     return lines + [""]
 
 
 # 8 ----------------------------------------------------------------------------------------------
 
-def champions_roles(m: pd.DataFrame) -> list[str]:
+def champions_roles(m: pd.DataFrame, out: dict) -> list[str]:
     def ranked(col):
         c = m.groupby(["puuid", col]).size().rename("n").reset_index()
         c = c.sort_values(["puuid", "n"], ascending=[True, False])
@@ -357,14 +402,19 @@ def champions_roles(m: pd.DataFrame) -> list[str]:
 
     lines = ["## 8. Campeões e rotas", "",
              "Rota principal e top 3 campeões de cada jogador contam as duas filas juntas.", ""]
+    main, top = _paired(x, "main_role"), _paired(x, "top3")
     lines += PAIRED_HEADER
-    lines += [_paired_row("% partidas na rota principal", _paired(x, "main_role"), 1),
-              _paired_row("% partidas com campeão do top 3", _paired(x, "top3"), 1),
+    lines += [_paired_row("% partidas na rota principal", main, 1),
+              _paired_row("% partidas com campeão do top 3", top, 1),
               _paired_row("campeões diferentes por partida", div, 3)]
+    g8 = out["campeoes_rotas"] = {"rota_principal": _paired_stats(main), "campeao_top3": _paired_stats(top),
+                                  "campeoes_por_partida": _paired_stats(div)}
     on_role = x[x.main_role == 100]
     lines += ["", "**Teste B só na rota principal**:", ""] + PAIRED_HEADER
     for col in ("score", "score_lane"):
-        lines.append(_paired_row(f"`{col}`", _paired(on_role, col)))
+        pr = _paired(on_role, col)
+        lines.append(_paired_row(f"`{col}`", pr))
+        g8[f"{col}_rota_principal"] = _paired_stats(pr)
     return lines + [""]
 
 
@@ -402,15 +452,17 @@ def run() -> str:
     lines = ["# Estudos complementares", "",
              f"{m.match_id.nunique()} partidas, {len(m)} linhas jogador-partida. "
              "Diferenças são flex - solo (positivo = melhor na flex).", ""]
-    lines += lobby_level(m, players, anchors)
-    lines += conversion_table(players)
-    lines += win_rates(m, players)
-    lines += premades(m)
-    lines += result_free(m)
-    lines += decompose(m)
-    lines += matchmaking(m, players)
-    lines += champions_roles(m)
+    dados = {"partidas": m.match_id.nunique(), "linhas": len(m)}
+    lines += lobby_level(m, players, anchors, dados)
+    lines += conversion_table(players, dados)
+    lines += win_rates(m, players, dados)
+    lines += premades(m, dados)
+    lines += result_free(m, dados)
+    lines += decompose(m, dados)
+    lines += matchmaking(m, players, dados)
+    lines += champions_roles(m, dados)
     lines += elo_trend(players)
+    video_export.gravar("estudos", dados)
     report = "\n".join(lines)
     REPORTS_DIR.mkdir(exist_ok=True)
     (REPORTS_DIR / "studies.md").write_text(report, encoding="utf-8")

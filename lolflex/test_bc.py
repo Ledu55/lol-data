@@ -8,6 +8,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
 
+from . import video_export
 from .config import DATA_DIR, QUEUE_IDS, REPORTS_DIR, SOLO, FLEX
 from .ranks import load_players
 
@@ -18,10 +19,12 @@ def run() -> str:
     scores = pd.read_parquet(DATA_DIR / "player_scores.parquet")
     players = load_players()
     lines = ["# Testes B e C: score de desempenho", ""]
+    dados = {}
 
     for col in ("score", "score_lane"):
         if f"{col}_shrunk" not in scores:
             continue
+        dados[col] = {}
         lines += [f"## Métrica: `{col}`", ""]
         s = scores[scores[f"{col}_n"] >= MIN_MATCHES]
         wide = s.pivot(index="puuid", columns="queue_id", values=f"{col}_mean")
@@ -33,6 +36,8 @@ def run() -> str:
             w = stats.wilcoxon(diff)
             lines += [f"**B**: {len(paired)} jogadores com ≥{MIN_MATCHES} partidas em cada fila. "
                       f"Score médio solo - flex = {diff.mean():+.3f} (Wilcoxon p={w.pvalue:.2g}).", ""]
+            dados[col]["b"] = {"jogadores": len(paired), "solo": paired[QUEUE_IDS[SOLO]].mean(),
+                               "flex": paired[QUEUE_IDS[FLEX]].mean(), "flex_menos_solo": -diff.mean(), "p": w.pvalue}
         else:
             lines += ["**B**: amostra insuficiente.", ""]
 
@@ -57,9 +62,13 @@ def run() -> str:
                 f"(p={fit.pvalues[coef_name]:.2g}). Se continua negativo, o jogador rende menos "
                 "até do que o elo solo dele sugere.", "",
             ]
+            dados[col]["c"] = {"n_flex_only": len(a), "mediana_flex_only": a.median(),
+                               "n_master_solo": len(b), "mediana_master_solo": b.median(), "p": u.pvalue,
+                               "efeito_controlado": fit.params[coef_name], "p_controlado": fit.pvalues[coef_name]}
         else:
             lines += ["**C**: amostra insuficiente.", ""]
 
+    video_export.gravar("testes_bc", dados)
     report = "\n".join(lines)
     REPORTS_DIR.mkdir(exist_ok=True)
     (REPORTS_DIR / "test_bc.md").write_text(report, encoding="utf-8")
